@@ -1,7 +1,8 @@
 # cbBTC 24h race bot
 
-Entry for the make.fun bounty "Race a BTC trading bot live for 24 hours"
-(https://make.fun/bounty/btc-race-24h-20261115-0828).
+[![make.fun bounty](https://make.fun/badge/btc-race-24h-20261115-0828.svg)](https://make.fun/bounty/btc-race-24h-20261115-0828) [![rank](https://make.fun/badge/btc-race-24h-20261115-0828/WhoIsTyfur/makefun-btc-race-24h-1115/rank.svg)](https://make.fun/bounty/btc-race-24h-20261115-0828) [![reward](https://make.fun/badge/btc-race-24h-20261115-0828/WhoIsTyfur/makefun-btc-race-24h-1115/reward.svg)](https://make.fun/bounty/btc-race-24h-20261115-0828)
+
+Entry for the make.fun bounty [Race a BTC trading bot live for 24 hours](https://make.fun/bounty/btc-race-24h-20261115-0828).
 
 ## What it does
 `main.ts` (Node 22, standard library only) speaks `agent-fun/bars-replay/v1`: it reads the `hello`,
