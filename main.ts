@@ -16,12 +16,17 @@ export type Params = {
   sleeve: number;    // fraction of equity per entry, in bps of 10000
   lateCut: number;   // no new entry within this many bars of the window end
   cool: number;      // bars to wait after an exit
+  maxBrk: number;    // breakout entries allowed (own budget, separate from dip entries)
+  bTrail: number;    // breakout leg: trailing stop from its peak
+  bSl: number;       // breakout leg: hard stop under entry
+  bHold: number;     // breakout leg: time exit in bars
 };
 
 export const DEFAULT: Params = {
-  mode: "dip", look: 240, dip: 0.04, turn: 0.002, brk: 0,
+  mode: "both", look: 240, dip: 0.04, turn: 0.002, brk: 0.004,
   tp: 0.04, sl: 0.01, trail: 0.008, hold: 240, maxTrades: 1,
   sleeve: 10000, lateCut: 180, cool: 30,
+  maxBrk: 2, bTrail: 0.008, bSl: 0.006, bHold: 1440,
 };
 
 export type Order =
@@ -43,6 +48,8 @@ export class Strategy {
   lastExit = -1e9;
   seq = 0;
   token = false;
+  kind = "";         // "dip" | "brk" | "tok": which leg the open position belongs to
+  brkTrades = 0;
   constructor(p: Params, totalBars = 1440) { this.p = p; this.total = totalBars; }
 
   step(close: number, cash: bigint, qty: bigint, sym: string): Order[] {
@@ -62,8 +69,9 @@ export class Strategy {
       if (this.entry === 0) { this.entry = close; this.entryBar = i; this.peak = close; }
       if (close > this.peak) this.peak = close;
       const r = close / this.entry - 1;
-      const exit = this.token || r >= p.tp || r <= -p.sl || i - this.entryBar >= p.hold ||
-        (p.trail > 0 && close <= this.peak * (1 - p.trail) && r > 0) || left <= 1;
+      let exit = left <= 1 || this.kind === "tok";
+      if (this.kind === "brk") exit = exit || r <= -p.bSl || i - this.entryBar >= p.bHold || close <= this.peak * (1 - p.bTrail);
+      else exit = exit || r >= p.tp || r <= -p.sl || i - this.entryBar >= p.hold || (p.trail > 0 && close <= this.peak * (1 - p.trail) && r > 0);
       if (exit && left >= 1) {
         out.push({ side: "sell", client_id: "s" + (this.seq++), symbol: sym, qty: qty.toString(), max_slippage_bps: 10000 });
         this.entry = 0; this.lastExit = i;
@@ -73,21 +81,23 @@ export class Strategy {
     this.entry = 0;
     // guardrail insurance: the race needs one filled order, so a quiet day gets a token 2 USDC round trip
     if (this.trades === 0 && i === this.total - 240 && cash > 3_000_000n) {
-      this.trades++; this.token = true;
+      this.trades++; this.token = true; this.kind = "tok";
       out.push({ side: "buy", client_id: "t" + (this.seq++), symbol: sym, notional_quote_units: "2000000", max_slippage_bps: 10000 });
       return out;
     }
-    if (n <= Math.min(p.look, 60) || this.trades >= p.maxTrades || left < p.lateCut || i - this.lastExit < p.cool) return out;
+    if (n <= Math.min(p.look, 60) || left < p.lateCut || i - this.lastExit < p.cool) return out;
 
     let go = false;
-    if (p.mode !== "breakout") {
+    if (p.mode !== "breakout" && this.trades - this.brkTrades < p.maxTrades) {
       if (this.armedLow === 0) { if (close <= hi * (1 - p.dip)) this.armedLow = close; }
       else {
         if (close < this.armedLow) this.armedLow = close;
-        if (close >= this.armedLow * (1 + p.turn)) { go = true; this.armedLow = 0; }
+        if (close >= this.armedLow * (1 + p.turn)) { go = true; this.armedLow = 0; this.kind = "dip"; }
       }
     }
-    if (p.mode !== "dip" && p.brk > 0 && n > p.look && close >= hi * (1 + p.brk)) go = true;
+    if (!go && p.mode !== "dip" && p.brk > 0 && this.brkTrades < p.maxBrk && n > p.look && close >= hi * (1 + p.brk)) {
+      go = true; this.kind = "brk"; this.brkTrades++;
+    }
     if (go) {
       const spend = (cash * BigInt(p.sleeve)) / 10000n - 1000n;
       if (spend >= 1_000_000n) {
